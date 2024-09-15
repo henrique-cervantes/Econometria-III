@@ -1,0 +1,154 @@
+## Questão 1) Faça o download de duas séries de tempo de frequências mensal ou trimestral
+
+#### Carregando os pacotes necessários
+
+```{r}
+library(tidyverse) 
+library(seasonal) 
+library(mFilter) 
+```
+
+#### Carregando as bases de dados
+
+-   **PIB Mensal (BC)**
+
+-   **Índice de emprego formal (BC)**
+
+```{r}
+data_pib <- read.csv2('PIB_M.csv')
+pib <- ts(data = data_pib, start = c(2010,03), end = c(2024, 08), frequency = 12)
+
+data_emprego <- read.csv2('Emprego_M.csv')
+emprego <- ts(data = data_emprego, start = c(2010,03), end = c(2024, 08), frequency = 12)
+```
+
+**1. Para cada uma das séries, realize o ajuste sazonal manualmente (métododas médias móveis centradas) e utilizando a metodologia Arima X13/Seats. Para cada variável, apresente em um gráfico os resultados obtidos e os dados sem ajuste. A série aparenta apresentar movimentos sazonais?**
+
+**Resposta:**
+
+Primeiro, vamos fazer a análise para a série de PIB mensal:
+
+```{r}
+
+plot(pib) # Série em nível
+plot(diff(pib)) # Gráfico da primeira diferença: modelo aditivo parece razoável
+
+#1. Ajuste de média móvel 
+decomposicao = decompose(pib,type = "additive")
+pib_ajustado_cma = pib - decomposicao$seasonal
+
+plot(pib)
+lines(pib_ajustado_cma, col = 'blue')
+
+
+#2. Ajuste via ARIMA X13-Seats
+modelo_sazonal = seas(pib, outlier = NULL)
+
+plot(modelo_sazonal)
+
+pib_x13 = predict(modelo_sazonal$GDP)
+```
+
+Apesar de não ser possível visualizar as séries original e ajustada num mesmo gráfico, é aparente que há movimentos sazonais.
+
+Agora, vamos fazer a análise para a série de emprego mensal:
+
+```{r}
+plot(emprego) # Série em nível
+plot(diff(emprego)) # Gráfico da primeira diferença: modelo aditivo parece razoável
+
+#1. Ajuste de média móvel 
+decomposicao_emp = decompose(emprego,type = "additive")
+emp_ajustado_cma = emprego - decomposicao_emp$seasonal
+
+plot(emprego)
+lines(emp_ajustado_cma, col = 'blue')
+
+
+#2. Ajuste via ARIMA X13-Seats
+modelo_sazonal_emp = seas(emprego)
+
+plot(modelo_sazonal)
+
+emprego_x13 = predict(modelo_sazonal)
+```
+
+Assim como no exercício anterior, o desemprego no Brasil parece apresentar sazonalidade. Infelizmente, não foi possível executar o modelo ARIMA.
+
+**Questão 1.2) Usando as séries dessazonalizadas via X13, extraia a tendência de cada série usando Filtro HP. Contraste a série com a tendência obtida. Você consegue identificar ciclos nos dados?**
+
+Primeiro, vamos fazer a análise para o PIB:
+
+```{r}
+pib_menor = window(pib_x13, end = c(2021,12))
+
+filtrado_menor_pib =  hpfilter(pib_menor,129600,type = "lambda")$trend
+filtrado_cheio_pib =  hpfilter(pib_x13,129600,type = "lambda")$trend
+
+plot(pib_x13)
+lines(filtrado_menor_pib, col = 'red')
+lines(filtrado_cheio_pib, col = 'blue')
+
+legend('topleft', c('Tendência HP (estimação até dez/2021)', 'Tendência HP (estimação até ago/2024)'),
+       col = c('red','blue'),lty = c(1,1), cex = 0.7)
+
+```
+
+Sim, é claramente possível encontrar ciclos na série - com a diferença da variabilidade dos dados no período pré-2015.
+
+Agora, vamos fazer o mesmo exercício para os dados de emprego:
+
+```{r}
+
+emp_menor = window(emp_x13, end = c(2021,12))
+
+filtrado_menor_emp =  hpfilter(emp_menor,129600,type = "lambda")$trend
+filtrado_cheio_emp =  hpfilter(emp_x13,129600,type = "lambda")$trend
+
+plot(emp_x13)
+lines(filtrado_menor_emp, col = 'red')
+lines(filtrado_cheio_emp, col = 'blue')
+
+legend('topleft', c('Tendência HP (estimação até dez/2021)', 'Tendência HP (estimação até ago/2024)'),
+       col = c('red','blue'),lty = c(1,1), cex = 0.7)
+```
+
+Não foi possível avaliar a série de empregos usando o Filtro HP
+
+**Questão 1.3) Implemente a proposta de Hamilton para as suas séries. Quais as diferenças em relação ao filtro HP**
+
+**Resposta:**
+
+Primeiro, vamos fazer isso para a série de PIB:
+
+```{r}
+
+#Proposta de Hamilton
+base_pib <- cbind(pib_x13, do.call(cbind, lapply(-24 - 0:3, function(x) stats::lag(pib_x13, x))))
+colnames(base_pib) = c('pib', paste('L',0:3,sep=''))
+
+model_pib = lm(pib~., data = base_pib)
+
+base_pib = cbind(base_pib, 'hamilton_cycle' =base_pib[,1]- predict(model_pib, base_pib))
+
+plot(base_pib[,"hamilton_cycle"], col = 'blue')
+abline(h=0)
+```
+
+O filtro de Hamilton é mais voltado para capturar e ajustar ciclos econômicos específicos, enquanto o filtro HP é mais focado em suavizar a série temporal para extrair a tendência de longo prazo. Por conseguinte, o FIltro de Hamilton, aplicado sobre a série de PIB brasileiro, é capaz de avaliar os ciclos, enquanto o FIltro HP é mais apropriado para capturar as tendências.
+
+Agora, vamos fazer o mesmo para os dados de emprego:
+
+```{r}
+base_emp <- cbind(emp_x13, do.call(cbind, lapply(-24 - 0:3, function(x) stats::lag(emp_x13, x))))
+colnames(emp_pib) = c('emprego', paste('L',0:3,sep=''))
+
+model_emp = lm(emp~., data = base_emp)
+
+base_emp = cbind(base_emp, 'hamilton_cycle' =base_emp[,1]- predict(model_emp, base_emp))
+
+plot(base_emp[,"hamilton_cycle"], col = 'blue')
+abline(h=0)
+```
+
+Não foi possível rodar os modelos para os dados de emprego. Portanto, não foi possível comparar os dois filtros.
